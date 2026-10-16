@@ -1,0 +1,357 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <title>Online Booking | AAH Enterprises</title>
+    <link href="https://fonts.googleapis.com/css2?family=DM+Serif+Display&family=Poppins:wght@300;400;500&display=swap" rel="stylesheet">
+    <link rel="stylesheet" href="style.css">
+</head>
+<body>
+
+<div id="loader">
+    <div class="loader-logo">AAH</div>
+    <p>Booking</p>
+    <div class="bar"><span></span></div>
+</div>
+
+<header>
+    <div class="logo">AAH Booking</div>
+    <button id="adminBtn" class="ghost" type="button">Admin</button>
+</header>
+
+<!-- PUBLIC: customer booking -->
+<main id="publicView">
+    <section class="hero">
+        <h1>Book your <span class="grad">appointment</span> online</h1>
+        <p class="sub">Choose a service, pick a time that suits you, and we will confirm your booking.</p>
+    </section>
+
+    <section class="card" id="bookCard">
+        <h2><b>1</b> Choose a service</h2>
+        <div id="services" class="services"></div>
+
+        <h2><b>2</b> Pick a date</h2>
+        <input id="date" type="date">
+        <p id="dateNote" class="note"></p>
+
+        <h2><b>3</b> Pick a time</h2>
+        <div id="slots" class="slots"><p class="note">Choose a date first.</p></div>
+
+        <h2><b>4</b> Your details</h2>
+        <div class="form">
+            <div><label for="name">Full name</label><input id="name" type="text" maxlength="80"></div>
+            <div><label for="phone">Phone / WhatsApp</label><input id="phone" type="tel" maxlength="30"></div>
+            <div><label for="email">Email (optional)</label><input id="email" type="email" maxlength="80"></div>
+            <div><label for="note">Note (optional)</label><input id="note" type="text" maxlength="200"></div>
+        </div>
+        <p id="bookError" class="error"></p>
+        <button id="bookBtn" type="button">Confirm booking</button>
+    </section>
+
+    <section class="card success hidden" id="successCard">
+        <div class="tick">&#10003;</div>
+        <h2>Booking received!</h2>
+        <p id="successText" class="sub"></p>
+        <button id="againBtn" class="ghost" type="button">Make another booking</button>
+    </section>
+</main>
+
+<!-- ADMIN login -->
+<main id="loginView" class="hidden">
+    <section class="card login">
+        <h1>Admin <span class="grad">login</span></h1>
+        <label for="aEmail">Email</label>
+        <input id="aEmail" type="email" autocomplete="username">
+        <label for="aPass">Password</label>
+        <input id="aPass" type="password" autocomplete="current-password">
+        <p id="loginError" class="error"></p>
+        <button id="loginBtn" type="button">Log in</button>
+        <button id="backBtn" class="ghost" type="button">Back to booking page</button>
+    </section>
+</main>
+
+<!-- ADMIN dashboard -->
+<main id="adminView" class="hidden">
+    <h1>All <span class="grad">bookings</span></h1>
+    <p class="sub" id="who"></p>
+
+    <div class="kpis">
+        <div class="kpi"><small>Today</small><b id="kToday">0</b></div>
+        <div class="kpi"><small>Pending</small><b id="kPending">0</b></div>
+        <div class="kpi"><small>Confirmed</small><b id="kConfirmed">0</b></div>
+        <div class="kpi"><small>Total</small><b id="kTotal">0</b></div>
+    </div>
+
+    <section class="card">
+        <div class="row-top">
+            <h2>Bookings</h2>
+            <select id="filter">
+                <option value="">All statuses</option><option>Pending</option><option>Confirmed</option><option>Cancelled</option>
+            </select>
+        </div>
+        <input id="search" type="search" placeholder="Search by name, phone, service or date">
+        <div id="list"></div>
+    </section>
+</main>
+
+<footer>&copy; 2026 AAH Enterprises &bull; Founder &amp; CEO: Muhammad Awais Raza</footer>
+
+<script type="module">
+    import { initializeApp } from "https://www.gstatic.com/firebasejs/10.12.2/firebase-app.js";
+    import { getAuth, signInWithEmailAndPassword, onAuthStateChanged, signOut }
+        from "https://www.gstatic.com/firebasejs/10.12.2/firebase-auth.js";
+    import { getFirestore, collection, doc, writeBatch, updateDoc, onSnapshot, query, where, serverTimestamp }
+        from "https://www.gstatic.com/firebasejs/10.12.2/firebase-firestore.js";
+
+    const firebaseConfig = {
+        apiKey: "AIzaSyBIw2odkVTIViTpHQgLPJ4Ng349oeoB4II",
+        authDomain: "aah-client-manager.firebaseapp.com",
+        projectId: "aah-client-manager",
+        storageBucket: "aah-client-manager.firebasestorage.app",
+        messagingSenderId: "273200959455",
+        appId: "1:273200959455:web:668c280c847caa6da0be6a"
+    };
+    const app = initializeApp(firebaseConfig);
+    const auth = getAuth(app);
+    const db = getFirestore(app);
+
+    // ---------- SETTINGS: change these for your own business ----------
+    const SERVICES = [
+        { name: 'Consultation',     time: '30 min', desc: 'A quick call to discuss your needs.' },
+        { name: 'Standard Service', time: '1 hour', desc: 'Our regular service, done properly.' },
+        { name: 'Premium Service',  time: '2 hours', desc: 'Extended service with full attention.' }
+    ];
+    const HOURS = ['10:00','11:00','12:00','13:00','14:00','15:00','16:00','17:00'];
+    const CLOSED_DAYS = [0];   // 0 = Sunday. Example for Fri+Sun: [0, 5]
+    // ------------------------------------------------------------------
+
+    const $ = id => document.getElementById(id);
+    const show = id => ['publicView','loginView','adminView'].forEach(v => $(v).classList.toggle('hidden', v !== id));
+
+    function localDate(d) {
+        const p = n => String(n).padStart(2, '0');
+        return d.getFullYear() + '-' + p(d.getMonth() + 1) + '-' + p(d.getDate());
+    }
+    function prettyTime(t) {
+        const h = Number(t.slice(0, 2));
+        return ((h + 11) % 12 + 1) + ':' + t.slice(3) + (h >= 12 ? ' PM' : ' AM');
+    }
+
+    window.addEventListener('load', () => setTimeout(() => $('loader').classList.add('hide'), 1800));
+
+    // ================= CUSTOMER SIDE =================
+    let selService = null, selTime = null, unsubSlots = null, taken = new Set();
+
+    SERVICES.forEach(s => {
+        const c = document.createElement('div');
+        c.className = 'svc';
+        const h = document.createElement('b'); h.textContent = s.name;
+        const t = document.createElement('small'); t.textContent = s.time;
+        const p = document.createElement('p'); p.textContent = s.desc;
+        c.append(h, t, p);
+        c.addEventListener('click', () => {
+            selService = s.name;
+            document.querySelectorAll('.svc').forEach(x => x.classList.remove('on'));
+            c.classList.add('on');
+        });
+        $('services').appendChild(c);
+    });
+
+    $('date').min = localDate(new Date());
+    $('date').addEventListener('change', onDate);
+
+    function onDate() {
+        selTime = null;
+        $('dateNote').textContent = '';
+        if (unsubSlots) { unsubSlots(); unsubSlots = null; }
+        const val = $('date').value;
+        if (!val) return;
+        const d = new Date(val + 'T00:00:00');
+        if (CLOSED_DAYS.includes(d.getDay())) {
+            $('dateNote').textContent = 'We are closed on this day. Please pick another date.';
+            $('slots').innerHTML = '<p class="note">No slots available.</p>';
+            return;
+        }
+        unsubSlots = onSnapshot(query(collection(db, 'slots'), where('date', '==', val)), snap => {
+            taken = new Set(snap.docs.map(x => x.data().time));
+            drawSlots();
+        }, () => { $('slots').innerHTML = '<p class="note">Could not load slots. Try again.</p>'; });
+    }
+
+    function drawSlots() {
+        const box = $('slots');
+        box.innerHTML = '';
+        const today = localDate(new Date());
+        const now = new Date();
+        HOURS.forEach(t => {
+            const b = document.createElement('button');
+            b.type = 'button';
+            b.className = 'slot' + (selTime === t ? ' on' : '');
+            b.textContent = prettyTime(t);
+            const past = $('date').value === today && Number(t.slice(0, 2)) <= now.getHours();
+            if (taken.has(t) || past) {
+                b.disabled = true;
+                b.title = taken.has(t) ? 'Already booked' : 'Time has passed';
+            }
+            b.addEventListener('click', () => { selTime = t; drawSlots(); });
+            box.appendChild(b);
+        });
+    }
+
+    $('bookBtn').addEventListener('click', async () => {
+        $('bookError').textContent = '';
+        const date = $('date').value;
+        const name = $('name').value.trim();
+        const phone = $('phone').value.trim();
+        if (!selService) return $('bookError').textContent = 'Please choose a service.';
+        if (!date)       return $('bookError').textContent = 'Please pick a date.';
+        if (!selTime)    return $('bookError').textContent = 'Please pick a time.';
+        if (!name || !phone) return $('bookError').textContent = 'Please enter your name and phone.';
+
+        const slotId = date + '_' + selTime.replace(':', '');
+        $('bookBtn').disabled = true;
+        try {
+            const batch = writeBatch(db);
+            batch.set(doc(db, 'slots', slotId), { date, time: selTime });
+            batch.set(doc(collection(db, 'bookings')), {
+                service: selService, date, time: selTime, name, phone,
+                email: $('email').value.trim(), note: $('note').value.trim(),
+                status: 'Pending', slotId, createdAt: serverTimestamp()
+            });
+            await batch.commit();
+            $('successText').textContent = selService + ' on ' + date + ' at ' + prettyTime(selTime) +
+                '. We will contact you on ' + phone + ' to confirm.';
+            $('bookCard').classList.add('hidden');
+            $('successCard').classList.remove('hidden');
+        } catch (e) {
+            $('bookError').textContent = e.code === 'permission-denied'
+                ? 'Sorry, this slot was just booked by someone else. Please pick another time.'
+                : 'Something went wrong. Please try again.';
+        }
+        $('bookBtn').disabled = false;
+    });
+
+    $('againBtn').addEventListener('click', () => {
+        ['name','phone','email','note'].forEach(i => $(i).value = '');
+        selTime = null;
+        $('successCard').classList.add('hidden');
+        $('bookCard').classList.remove('hidden');
+        onDate();
+    });
+
+    // ================= ADMIN SIDE =================
+    let unsubBookings = null, bookings = [];
+
+    $('adminBtn').addEventListener('click', () => {
+        if (auth.currentUser) signOut(auth);
+        else show('loginView');
+    });
+    $('backBtn').addEventListener('click', () => show('publicView'));
+    $('loginBtn').addEventListener('click', login);
+    $('aPass').addEventListener('keydown', e => { if (e.key === 'Enter') login(); });
+
+    async function login() {
+        $('loginError').textContent = '';
+        try {
+            await signInWithEmailAndPassword(auth, $('aEmail').value.trim(), $('aPass').value);
+            $('aPass').value = '';
+        } catch (e) { $('loginError').textContent = 'Wrong email or password.'; }
+    }
+
+    onAuthStateChanged(auth, u => {
+        if (unsubBookings) { unsubBookings(); unsubBookings = null; }
+        if (u) {
+            $('adminBtn').textContent = 'Log out';
+            $('who').textContent = 'Logged in as ' + u.email;
+            show('adminView');
+            unsubBookings = onSnapshot(collection(db, 'bookings'), snap => {
+                bookings = snap.docs.map(d => ({ id: d.id, ...d.data() }));
+                renderAdmin();
+            }, () => {
+                alert('This account is not allowed to see bookings (admin only).');
+                signOut(auth);
+            });
+        } else {
+            $('adminBtn').textContent = 'Admin';
+            bookings = [];
+            show('publicView');
+        }
+    });
+
+    $('search').addEventListener('input', renderAdmin);
+    $('filter').addEventListener('change', renderAdmin);
+
+    async function setStatus(b, status) {
+        try {
+            if (status === 'Cancelled') {
+                const batch = writeBatch(db);
+                batch.update(doc(db, 'bookings', b.id), { status });
+                batch.delete(doc(db, 'slots', b.slotId));
+                await batch.commit();
+            } else {
+                await updateDoc(doc(db, 'bookings', b.id), { status });
+            }
+        } catch (e) { alert('Could not update. (' + e.code + ')'); }
+    }
+    async function removeBooking(b) {
+        if (!confirm('Delete booking of ' + b.name + '?')) return;
+        try {
+            const batch = writeBatch(db);
+            batch.delete(doc(db, 'bookings', b.id));
+            batch.delete(doc(db, 'slots', b.slotId));
+            await batch.commit();
+        } catch (e) { alert('Could not delete. (' + e.code + ')'); }
+    }
+
+    function renderAdmin() {
+        const today = localDate(new Date());
+        $('kToday').textContent = bookings.filter(b => b.date === today && b.status !== 'Cancelled').length;
+        $('kPending').textContent = bookings.filter(b => b.status === 'Pending').length;
+        $('kConfirmed').textContent = bookings.filter(b => b.status === 'Confirmed').length;
+        $('kTotal').textContent = bookings.length;
+
+        const q = $('search').value.trim().toLowerCase();
+        const f = $('filter').value;
+        const list = bookings
+            .filter(b => !f || b.status === f)
+            .filter(b => [b.name, b.phone, b.service, b.date].join(' ').toLowerCase().includes(q))
+            .sort((a, b) => (a.date + a.time).localeCompare(b.date + b.time));
+
+        const box = $('list');
+        box.innerHTML = '';
+        if (!list.length) { box.innerHTML = '<p class="note">No bookings found.</p>'; return; }
+
+        list.forEach(b => {
+            const row = document.createElement('div');
+            row.className = 'bk';
+
+            const info = document.createElement('div');
+            const t = document.createElement('b'); t.textContent = b.date + ' \u2022 ' + prettyTime(b.time);
+            const n = document.createElement('span'); n.textContent = b.name + ' \u2014 ' + b.service;
+            const c = document.createElement('small');
+            c.textContent = [b.phone, b.email, b.note].filter(Boolean).join(' \u2022 ');
+            info.append(t, n, c);
+
+            const side = document.createElement('div'); side.className = 'side';
+            const badge = document.createElement('span');
+            badge.className = 'badge ' + (b.status || '').toLowerCase();
+            badge.textContent = b.status;
+            side.appendChild(badge);
+
+            const mk = (label, cls, fn) => {
+                const x = document.createElement('button');
+                x.className = 'small ' + cls; x.textContent = label;
+                x.addEventListener('click', fn); side.appendChild(x);
+            };
+            if (b.status === 'Pending') mk('Confirm', '', () => setStatus(b, 'Confirmed'));
+            if (b.status !== 'Cancelled') mk('Cancel', 'ghost', () => setStatus(b, 'Cancelled'));
+            mk('Delete', 'ghost', () => removeBooking(b));
+
+            row.append(info, side);
+            box.appendChild(row);
+        });
+    }
+</script>
+</body>
+</html>
